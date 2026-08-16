@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # tsc --noEmit && vite build — typecheck and bundle in one.
+      - name: Build
+        run: npm run build
+
+      # Drives the real UI against a fully mocked API — no backend needed.
+      - name: End-to-end match flow
+        run: npm run test:e2e
+
+  image:
+    name: Build image
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR rejects uppercase; the owner here is "Vikteur".
+      - name: Compute image name
+        id: meta
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          echo "image=${REGISTRY}/${repo}:${GITHUB_SHA}" >>"$GITHUB_OUTPUT"
+          echo "latest=${REGISTRY}/${repo}:latest" >>"$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: echo "Pushed \`${{ steps.meta.outputs.image }}\`" >>"$GITHUB_STEP_SUMMARY"
