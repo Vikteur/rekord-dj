@@ -200,7 +200,7 @@ export function Sidebar() {
           <span>Remembered</span>
           <span className="mono muted">{prefs.length}</span>
         </button>
-        {user?.role === 'admin' && (
+        {user?.role === 'PLANNER' && (
           <button
             className="stat-row"
             title="Create DJ logins and manage their access"
@@ -237,7 +237,7 @@ export function Sidebar() {
         </div>
         {/* Who is signed in — sign out is always one visible click away. */}
         <div className="user-row">
-          <span className="user-name" title={user ? `Signed in as ${user.username}` : undefined}>
+          <span className="user-name" title={user ? `Signed in as ${user.email}` : undefined}>
             {user?.display_name ?? '…'}
           </span>
           <button

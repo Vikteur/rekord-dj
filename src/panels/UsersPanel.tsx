@@ -19,7 +19,7 @@ export function UsersPanel() {
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<string | null>(null); // which action runs
-  const [resetFor, setResetFor] = useState<number | null>(null);
+  const [resetFor, setResetFor] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
 
   useEffect(() => {
@@ -66,7 +66,7 @@ export function UsersPanel() {
 
   async function remove(target: UserAccount) {
     const sure = window.confirm(
-      `Delete the account ${target.username}?\n\nTheir couples and libraries stay, ` +
+      `Delete the account ${target.email}?\n\nTheir couples and libraries stay, ` +
         'unowned — you can hand them to another DJ afterwards.',
     );
     if (!sure) return;
@@ -121,11 +121,14 @@ export function UsersPanel() {
               <div className="list-row">
                 <span className="list-main">
                   <strong>{account.display_name}</strong>
-                  <span className="muted"> · {account.username}</span>
-                  {account.role === 'admin' && <span className="muted"> · admin</span>}
-                  {account.disabled && <span className="warn"> · disabled</span>}
+                  <span className="muted"> · {account.email}</span>
+                  {account.role === 'PLANNER' && <span className="muted"> · planner</span>}
+                  {account.status === 'DISABLED' && <span className="warn"> · disabled</span>}
+                  {account.status === 'INVITED' && (
+                    <span className="muted"> · invited, not signed in yet</span>
+                  )}
                 </span>
-                {account.role !== 'admin' && (
+                {account.role !== 'PLANNER' && (
                   <span className="field-row">
                     <button
                       className="btn btn-ghost btn-sm"
@@ -140,17 +143,19 @@ export function UsersPanel() {
                     <button
                       className="btn btn-ghost btn-sm"
                       title={
-                        account.disabled
+                        account.status === 'DISABLED'
                           ? 'Let this DJ sign in again'
                           : 'Block sign-in and end their session'
                       }
                       onClick={() =>
                         void run(`disable-${account.id}`, () =>
-                          api.updateUser(account.id, { disabled: !account.disabled }),
+                          api.updateUser(account.id, {
+                            status: account.status === 'DISABLED' ? 'ACTIVE' : 'DISABLED',
+                          }),
                         )
                       }
                     >
-                      {account.disabled ? 'Enable' : 'Disable'}
+                      {account.status === 'DISABLED' ? 'Enable' : 'Disable'}
                     </button>
                     <button
                       className="btn btn-ghost btn-sm"

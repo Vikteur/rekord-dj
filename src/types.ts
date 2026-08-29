@@ -1,250 +1,119 @@
-// Mirrors the JSON shapes served by the backend, Vikteur/spotify-to-rekordbox
-// (server/models.py + server/main.py).
+/**
+ * The API's types.
+ *
+ * Everything above the last divider is an alias for a schema in
+ * `src/api/schema.d.ts`, generated from `rekord-contract`. These used to be
+ * hand-copied from the Python models and kept in sync by eye across three
+ * repos, which is how this app came to ship a `ScanStatus.library` the server
+ * had stopped sending: `useScanPolling` waited on a field that never arrived,
+ * so the library summary silently never refreshed after a scan. That whole
+ * class of bug is now a compile error.
+ *
+ * Regenerate with `npm run types` after the contract changes.
+ */
 
-export interface LibraryTrack {
-  id: string;
-  path: string;
-  filename: string;
-  ext: string;
-  artist: string | null;
-  title: string;
-  album: string | null;
-  duration_sec: number | null;
-  bitrate_kbps: number | null;
-  tag_source: 'tags' | 'filename' | 'rekordbox';
-  size_bytes: number;
-  mtime_ms: number;
-  bpm: number | null;
-  musical_key: string | null;
-}
+import type { components } from './api/schema'
 
-export interface Source {
-  id: number;
-  library_id: number;
-  kind: 'folder' | 'xml';
-  label: string;
-  added_at: string;
-  track_count: number;
-}
+type S = components['schemas']
 
-export interface LibraryInfo {
-  id: number;
-  name: string;
-  owner_id: number | null;   // users.id; null = pre-auth row, admin-only
-  created_at: string;
-  track_count: number;
-  source_count: number;
-}
+// --- the library ------------------------------------------------------------
 
-export interface LibrarySummary {
-  active_library_id: number | null;
-  active_library_name: string | null;
-  track_count: number;
-  by_ext: Record<string, number>;
-  libraries: LibraryInfo[];
-  sources: Source[];
-}
+export type LibraryTrack = S['LibraryTrack']
+export type Source = S['Source']
+export type LibraryInfo = S['LibraryInfo']
+export type LibrarySummary = S['LibrarySummary']
+export type ScanReport = S['ScanReport']
+export type ScanStatus = S['ScanStatus']
+export type XmlImportResult = S['XmlImportResult']
+export type PlaylistInfo = S['PlaylistInfo']
+export type PlaylistImportResult = S['PlaylistImportResult']
 
-export interface ScanReport {
-  folder: string;
-  track_count: number;
-  from_cache: number;
-  skipped_drm: number;
-  skipped_drm_files?: string[];   // capped list, for showing which ones
-  scan_ms: number;
-  scanned_at: string;
-}
+/**
+ * A playlist fetched from Spotify — the thing being matched.
+ *
+ * Not to be confused with `PlaylistInfo`, which is a rekordbox playlist already
+ * imported into the library. The two have lived under adjacent names in this
+ * app from the start.
+ */
+export type Playlist = S['SpotifyPlaylist']
 
-export interface ScanStatus {
-  state: 'idle' | 'scanning' | 'done' | 'error';
-  folder?: string;
-  library_id?: number;
-  found?: number;
-  parsed?: number;
-  from_cache?: number;
-  skipped_drm?: number;
-  errors?: { file: string; message: string }[];
-  scanned?: ScanReport;
-  message?: string;
-}
+// --- matching ---------------------------------------------------------------
 
-export interface XmlImportResult {
-  imported: number;
-  missing_files: number;
-  warnings: string[];
-  library: LibrarySummary;
-}
+export type PlaylistTrack = S['PlaylistTrack']
+export type VersionInfo = S['VersionInfo']
+export type ScoredCandidate = S['ScoredCandidate']
+export type MatchResult = S['MatchResult']
+export type MatchResponse = S['MatchResponse']
+export type Preference = S['Preference']
 
-export interface PlaylistTrack {
-  index: number;
-  artist: string;
-  title: string;
-  duration_sec: number | null;
-}
+// --- accounts ---------------------------------------------------------------
 
-export interface Playlist {
-  name: string;
-  owner_name: string | null;
-  total: number | null;
-  truncated: boolean;
-  tracks: PlaylistTrack[];
-}
+export type Me = S['Me']
+export type UserAccount = S['UserAccount']
+export type Role = S['Role']
 
-export interface VersionInfo {
-  descriptors: string[];
-  remixer: string | null;
-}
+// --- the couple's lists -----------------------------------------------------
 
-export interface ScoredCandidate {
-  track: LibraryTrack;
-  score: number;
-  parts: Record<string, number | null>;
-  version: VersionInfo;
-  duration_delta_sec: number | null;
-  playlists: string[];
-}
+export type ListKind = S['ListKind']
+export type SongListCode = S['SongListCode']
+export type StartPref = S['StartPref']
+export type SongEntry = S['SongEntry']
+export type BlockEntry = S['BlockEntry']
+export type CoupleChange = S['CoupleChange']
+export type SongListSummary = S['SongListSummary']
+export type SongListWithEntries = S['SongListWithEntries']
+export type PortalLink = S['PortalLink']
+export type PortalLinks = S['PortalLinks']
+export type Wedding = S['Wedding']
+export type WeddingSummary = S['WeddingSummary']
 
-export interface PlaylistInfo {
-  id: number;
-  library_id: number;
-  name: string;
-  added_at: string;
-  track_count: number;
-  missing_count: number;
-}
+/**
+ * This app's name for a song on one of the six lists. The contract calls it
+ * `SongEntry`; the alias keeps the existing call sites compiling.
+ */
+export type CoupleEntry = SongEntry
 
-export interface PlaylistImportResult {
-  playlist_id: number;
-  name: string;
-  resolved: number;
-  missing: number;
-  missing_examples: string[];
-  playlists: PlaylistInfo[];
-}
-
-export interface MatchResult {
-  input: PlaylistTrack;
-  input_version: VersionInfo;
-  bucket: 'auto' | 'ambiguous' | 'unmatched';
-  candidates: ScoredCandidate[];
-  auto_selected_id: string | null;
-  from_preference: boolean;
-}
-
-export interface Preference {
-  id: string;
-  artist: string;
-  title: string;
-  track_id: string;
-  chosen_at: string;
-  file_label: string | null;
-}
-
-// --- wedding couples, DJ side (server/couples.py + server/couples_api.py) ---
+// --- not yet migrated -------------------------------------------------------
 //
-// What the DJ sees of a couple: their lists, their magic links, and the change
-// log. The guest-facing shapes (GuestState, SongHit) belong to the intake app,
-// Vikteur/rekord-couple.
+// The couples panel is the last part of this app still built on the pre-rewrite
+// domain: numeric couple ids, one `names` string, and two magic-link tokens per
+// couple. The contract models the same thing as a wedding with a uuid, two
+// partner rows and one portal per scope — so these are not a rename apart, the
+// panel has to be migrated. Until it is, these describe what that panel still
+// expects rather than what the server now sends, and they are deliberately the
+// only hand-written types left in this file.
 
-export type ListKind =
-  | 'opening_dance'
-  | 'second_third'
-  | 'couple_top20'
-  | 'friends_top20'
-  | 'must_plays'
-  | 'playlist_links';
-
-export type StartPref = 'top' | 'chorus' | 'fade';
-export type TokenKind = 'couple' | 'friend' | 'dj';
-
-export interface CoupleEntry {
-  uid: string;
-  kind: ListKind;
-  position: number;
-  spotify_id: string | null;
-  isrc: string | null;
-  title: string;
-  artist: string;
-  duration_ms: number | null;
-  art_url: string | null;
-  free_text: string | null;
-  note: string | null;
-  start_pref: StartPref | null;
-  source_token_kind: TokenKind;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface BlockEntry {
-  uid: string;
-  position: number;
-  spotify_id: string | null;
-  isrc: string | null;
-  title: string;
-  artist: string;
-  duration_ms: number | null;
-  art_url: string | null;
-  free_text: string | null;
-  source_token_kind: TokenKind;
-  created_at: string;
-}
+export type TokenKind = 'couple' | 'friend' | 'dj'
 
 export interface CoupleLink {
-  token: string;
-  path: string;
-  revoked: boolean;
-  expired: boolean;
-}
-
-export interface CoupleChange {
-  token_kind: TokenKind;
-  action: string;
-  kind: string | null;
-  uid: string | null;
-  summary: string;
-  at: string;
+  token: string
+  path: string
+  revoked: boolean
+  expired: boolean
 }
 
 export interface CoupleSummary {
-  id: number;
-  names: string;
-  wedding_date: string;
-  dj_id: number | null;          // owning DJ; null = pre-auth row (admin's)
-  dj_name?: string | null;       // resolved display name, for the admin's list
-  created_at: string;
-  counts: Record<string, number>;
-  song_count: number;
-  last_change_at: string | null;
+  id: number
+  names: string
+  wedding_date: string
+  dj_id: number | null // owning DJ; null = pre-auth row (admin's)
+  dj_name?: string | null // resolved display name, for the admin's list
+  created_at: string
+  counts: Record<string, number>
+  song_count: number
+  last_change_at: string | null
 }
 
 export interface CoupleDetail {
-  id: number;
-  names: string;
-  wedding_date: string;
-  briefing_text: string;
-  dj_id: number | null;
-  dj_name?: string | null;
-  created_at: string;
-  links: { couple: CoupleLink; friends: CoupleLink };
-  lists: Record<ListKind, CoupleEntry[]>;
-  blocklist: BlockEntry[];
-  changes: CoupleChange[];
-}
-
-// --- accounts (server/auth.py + server/auth_api.py) --------------------------
-
-export interface Me {
-  id: number;
-  username: string;
-  display_name: string;
-  role: 'admin' | 'dj';
-}
-
-export interface UserAccount {
-  id: number;
-  username: string;
-  display_name: string;
-  role: 'admin' | 'dj';
-  disabled: boolean;
-  created_at: string;
+  id: number
+  names: string
+  wedding_date: string
+  briefing_text: string
+  dj_id: number | null
+  dj_name?: string | null
+  created_at: string
+  links: { couple: CoupleLink; friends: CoupleLink }
+  lists: Record<ListKind, CoupleEntry[]>
+  blocklist: BlockEntry[]
+  changes: CoupleChange[]
 }

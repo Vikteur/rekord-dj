@@ -80,14 +80,20 @@ export const api = {
       body: JSON.stringify({ username, display_name: displayName, password }),
     }),
   updateUser: (
-    id: number,
-    fields: { display_name?: string; password?: string; disabled?: boolean },
+    // uuid, not an auto-increment integer: accounts are addressed by an
+    // opaque id so a user list cannot be walked by counting.
+    id: string,
+    fields: {
+      display_name?: string
+      password?: string
+      status?: 'INVITED' | 'ACTIVE' | 'DISABLED'
+    },
   ) =>
     request<{ users: UserAccount[] }>(`/api/users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(fields),
     }),
-  deleteUser: (id: number) =>
+  deleteUser: (id: string) =>
     request<{ users: UserAccount[] }>(`/api/users/${id}`, { method: 'DELETE' }),
   library: () => request<LibrarySummary>('/api/library'),
   createLibrary: (name: string) =>

@@ -90,7 +90,7 @@ function EntryLine({ entry }: { entry: CoupleEntry }) {
 export function CouplesPanel() {
   const s = useApp();
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'PLANNER';
   const { panelArg, closePanel } = useUi();
   const [selectedId, setSelectedId] = useState<number | null>(() => {
     const parsed = Number(panelArg);
@@ -109,7 +109,7 @@ export function CouplesPanel() {
     if (!isAdmin) return;
     api
       .users()
-      .then((data) => setAccounts(data.users.filter((account) => !account.disabled)))
+      .then((data) => setAccounts(data.users.filter((account) => account.status === 'ACTIVE')))
       .catch(() => undefined);
   }, [isAdmin]);
 
