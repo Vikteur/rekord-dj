@@ -30,6 +30,7 @@ export interface Source {
 export interface LibraryInfo {
   id: number;
   name: string;
+  owner_id: number | null;   // users.id; null = pre-auth row, admin-only
   created_at: string;
   track_count: number;
   source_count: number;
@@ -57,12 +58,12 @@ export interface ScanReport {
 export interface ScanStatus {
   state: 'idle' | 'scanning' | 'done' | 'error';
   folder?: string;
+  library_id?: number;
   found?: number;
   parsed?: number;
   from_cache?: number;
   skipped_drm?: number;
   errors?: { file: string; message: string }[];
-  library?: LibrarySummary;
   scanned?: ScanReport;
   message?: string;
 }
@@ -208,6 +209,8 @@ export interface CoupleSummary {
   id: number;
   names: string;
   wedding_date: string;
+  dj_id: number | null;          // owning DJ; null = pre-auth row (admin's)
+  dj_name?: string | null;       // resolved display name, for the admin's list
   created_at: string;
   counts: Record<string, number>;
   song_count: number;
@@ -219,9 +222,29 @@ export interface CoupleDetail {
   names: string;
   wedding_date: string;
   briefing_text: string;
+  dj_id: number | null;
+  dj_name?: string | null;
   created_at: string;
   links: { couple: CoupleLink; friends: CoupleLink };
   lists: Record<ListKind, CoupleEntry[]>;
   blocklist: BlockEntry[];
   changes: CoupleChange[];
+}
+
+// --- accounts (server/auth.py + server/auth_api.py) --------------------------
+
+export interface Me {
+  id: number;
+  username: string;
+  display_name: string;
+  role: 'admin' | 'dj';
+}
+
+export interface UserAccount {
+  id: number;
+  username: string;
+  display_name: string;
+  role: 'admin' | 'dj';
+  disabled: boolean;
+  created_at: string;
 }

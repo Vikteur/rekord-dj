@@ -57,14 +57,26 @@ Vite proxies `/api` to `http://127.0.0.1:8000`. Point it elsewhere with
 | `npm run test:e2e` | The match-table pick/undo suite — no backend needed |
 | `npm run check:couples` | Couples-panel walk-through against a real backend |
 
-**The DJ app has no login.** No account, no sign-in, no Spotify
-authentication — open `/` and you are straight in. Access control is the edge
-proxy's job, and it is configured in `spotify-to-rekordbox/deploy/nginx/rekord.conf`.
+**The DJ app signs in.** One `GET /api/me` on boot decides between the sign-in
+screen and the app. There is no sign-up: the admin is bootstrapped from the
+environment, and every DJ gets a login handed to them.
 
-> ⚠️ **Auth is switched off there on purpose and temporarily.** Deployed as-is,
-> the DJ side is public — including `/api/couples`, which hands every couple's
-> magic link to any caller, and `/api/scan`, which reads folders on the server.
-> See the backend repo to put it back.
+Two roles. The **admin** sees and manages everything and is the only one who
+creates accounts, from the DJ accounts panel. A **DJ** sees only their own
+couples and their own libraries — someone else's answers 404, exactly like one
+that does not exist, so ids cannot be probed.
+
+The session is a cookie: `rm_session`, HttpOnly, holding a random token whose
+SHA-256 is all the server stores. Any 401 from any call fires a shared
+signed-out event and returns the app to the sign-in screen, so an expired or
+revoked session never leaves someone clicking dead buttons.
+
+Couples and their friends never sign in — their `/g/<token>` magic link is
+their key, and those routes take no session at all.
+
+> This replaces the edge-proxy Basic auth the app used to rely on. The nginx
+> config in `spotify-to-rekordbox/deploy/nginx/` no longer guards `/api`, so a
+> deployment that predates this needs both sides updated together.
 
 ## What's in here
 
