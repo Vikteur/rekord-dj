@@ -8,8 +8,9 @@ import {
 } from 'react';
 import { ApiError, api, downloadExport, downloadMissing, parseTextPlaylist } from './api';
 import type {
-  CoupleDetail,
-  CoupleSummary,
+  BlockEntry,
+  SongListWithEntries,
+  WeddingSummary,
   LibrarySummary,
   LibraryTrack,
   ListKind,
@@ -20,6 +21,14 @@ import type {
   ScanStatus,
 } from './types';
 import { SKIP } from './format';
+
+/** One wedding's answers, as the panel loads them for matching. */
+export interface LoadedWedding {
+  id: string;
+  names: string;
+  lists: SongListWithEntries[];
+  blocklist: BlockEntry[];
+}
 import { useScanPolling } from './useScanPolling';
 
 const message = (error: unknown) =>
@@ -70,11 +79,11 @@ function useAppStore() {
   const [name, setName] = useState('');
   const [exportError, setExportError] = useState('');
 
-  // --- Section 5: wedding couples ---
-  const [couples, setCouples] = useState<CoupleSummary[]>([]);
+  // --- Section 5: the weddings this DJ is playing ---
+  const [weddings, setWeddings] = useState<WeddingSummary[]>([]);
   // Set while the loaded playlist came from a couple chapter: exports then
   // pass couple_id so the server drops everything on their never list.
-  const [activeCouple, setActiveCouple] = useState<{ id: number; names: string } | null>(null);
+  const [activeCouple, setActiveCouple] = useState<{ id: string; names: string } | null>(null);
 
   useEffect(() => {
     // The library is restored from the database, so a reload needs no rescan.
@@ -82,7 +91,7 @@ function useAppStore() {
     api.scanStatus().then(setScan).catch(() => undefined);
     api.preferences().then((r) => setPrefs(r.preferences)).catch(() => undefined);
     api.playlists().then((r) => setPlaylists(r.playlists)).catch(() => undefined);
-    api.couples().then((r) => setCouples(r.couples ?? [])).catch(() => undefined);
+    api.weddings().then((r) => setWeddings(r.weddings ?? [])).catch(() => undefined);
   }, []);
 
   useScanPolling(scan, setScan, setLib);
@@ -275,7 +284,7 @@ function useAppStore() {
 
   async function refreshCouples() {
     try {
-      setCouples((await api.couples()).couples);
+      setWeddings((await api.weddings()).weddings);
     } catch {
       // sidebar counts only — the panel surfaces real errors
     }
@@ -286,8 +295,8 @@ function useAppStore() {
    * their never list are dropped up front; the export re-checks server-side,
    * so a blocked song can't sneak out even via manual picks.
    */
-  function loadCoupleChapter(detail: CoupleDetail, kind: ListKind, label: string) {
-    const entries = detail.lists[kind] ?? [];
+  function loadCoupleChapter(detail: LoadedWedding, kind: ListKind, label: string) {
+    const entries = detail.lists.find((list) => list.kind === kind)?.entries ?? [];
     const blockedIds = new Set(
       detail.blocklist.map((block) => block.spotify_id).filter(Boolean),
     );
@@ -502,7 +511,7 @@ function useAppStore() {
     url, setUrl, pasted, setPasted, playlist, playlistNote, playlistError,
     fetching, matching, matchError, fetchPlaylist, usePastedList, runMatch,
     // wedding couples
-    couples, activeCouple, refreshCouples, loadCoupleChapter,
+    weddings, activeCouple, refreshCouples, loadCoupleChapter,
     // matches
     results, selections, remembered, rememberNote, chooseVersion, resetChoice,
     rowStatus, unresolvedCount,

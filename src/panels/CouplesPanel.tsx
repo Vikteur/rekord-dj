@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react';
 import { ApiError, api } from '../api';
-import { useAuth } from '../auth';
 import { formatDuration } from '../format';
 import { useApp } from '../store';
-import type { CoupleDetail, CoupleEntry, ListKind, UserAccount } from '../types';
+import type { LoadedWedding } from '../store';
+import type {
+  BlockEntry,
+  CoupleChange,
+  CoupleEntry,
+  ListKind,
+  SongListWithEntries,
+  WeddingSummary,
+} from '../types';
 import { useUi } from '../ui/UiContext';
-import { QrBadge } from '../components/QrBadge';
-
-/**
- * Where the intake app (Vikteur/rekord-couple) answers /g/<token>. In
- * production it sits behind the same hostname as this app, so the default —
- * this page's own origin — is what the couple should be handed. Set
- * VITE_GUEST_ORIGIN when the two run on different ports, as they do in dev.
- */
-const GUEST_ORIGIN = (import.meta.env.VITE_GUEST_ORIGIN ?? '').replace(/\/$/, '');
 import { Panel } from './Panel';
 
 /** The chapters a couple fills in, in intake order, with the DJ-side labels. */
@@ -36,35 +34,6 @@ function timeAgo(iso: string): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-function CopyField({ value, disabled }: { value: string; disabled?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="copylink">
-      <input
-        className="input copylink-input"
-        readOnly
-        value={value}
-        onFocus={(event) => event.target.select()}
-      />
-      <button
-        className="btn btn-sm"
-        disabled={disabled}
-        onClick={() => {
-          navigator.clipboard
-            .writeText(value)
-            .then(() => {
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            })
-            .catch(() => undefined);
-        }}
-      >
-        {copied ? 'Copied!' : 'Copy'}
-      </button>
-    </div>
-  );
-}
-
 function EntryLine({ entry }: { entry: CoupleEntry }) {
   return (
     <div className="list-track">
@@ -82,415 +51,230 @@ function EntryLine({ entry }: { entry: CoupleEntry }) {
   );
 }
 
+function BlockLine({ entry }: { entry: BlockEntry }) {
+  return (
+    <div className="list-track">
+      <span className="list-track-n mono muted">·</span>
+      <span className="list-main">
+        {entry.artist ? `${entry.artist} – ` : ''}
+        {entry.title}
+      </span>
+    </div>
+  );
+}
+
 /**
- * The DJ's window on one couple: create the record, hand out the two magic
- * links, watch the chapters stream in live, and load any chapter into the
- * match table like a normal playlist.
+ * The DJ's window on the weddings they are playing.
+ *
+ * Read-only, and that is the design rather than an omission. Creating a
+ * wedding, rotating the couple's link and switching it off belong to the
+ * planner, who booked the couple and owns that relationship; the DJ is
+ * assigned to the day and needs the music, the never list and the briefing. An
+ * account holding both roles does the first set in the planner app and sees
+ * the result here.
+ *
+ * Access follows the person named in the DJ slot, not the company they belong
+ * to — being listed in the directory as a DJ is not enough to see anyone's
+ * answers.
  */
 export function CouplesPanel() {
   const s = useApp();
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'PLANNER';
   const { panelArg, closePanel } = useUi();
-  const [selectedId, setSelectedId] = useState<number | null>(() => {
-    const parsed = Number(panelArg);
-    return panelArg && panelArg !== 'new' && Number.isInteger(parsed) ? parsed : null;
-  });
-  const [detail, setDetail] = useState<CoupleDetail | null>(null);
-  const [names, setNames] = useState('');
-  const [date, setDate] = useState('');
-  const [djId, setDjId] = useState<number | ''>(''); // '' = myself
-  const [accounts, setAccounts] = useState<UserAccount[]>([]);
-  const [error, setError] = useState('');
+
+  const [selectedId, setSelectedId] = useState<string | null>(
+    typeof panelArg === 'string' && panelArg !== 'new' ? panelArg : null,
+  );
+  const [detail, setDetail] = useState<LoadedWedding | null>(null);
+  const [changes, setChanges] = useState<CoupleChange[]>([]);
+  const [briefing, setBriefing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  // Only the admin assigns weddings to other DJs, so only they need the list.
   useEffect(() => {
-    if (!isAdmin) return;
-    api
-      .users()
-      .then((data) => setAccounts(data.users.filter((account) => account.status === 'ACTIVE')))
-      .catch(() => undefined);
-  }, [isAdmin]);
+    void s.refreshCouples();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // The couple answers from home — poll while their page is open so the
-  // lists stream in live.
+  /**
+   * Load one wedding's answers.
+   *
+   * The couple answers from home, so this polls while the panel is open — a DJ
+   * who leaves it up during the week watches the lists fill in. Only the first
+   * load shows a spinner; the refreshes are silent, because a list that blinks
+   * every fifteen seconds is worse than one that quietly grows.
+   */
   useEffect(() => {
-    if (selectedId === null) {
+    if (!selectedId) {
       setDetail(null);
+      setChanges([]);
+      setBriefing(null);
       return;
     }
-    let alive = true;
-    const load = () =>
-      api
-        .couple(selectedId)
-        .then((fresh) => {
-          if (alive) setDetail(fresh);
-        })
-        .catch((err: unknown) => {
-          if (alive) setError(message(err));
+    let cancelled = false;
+
+    async function load(showBusy: boolean) {
+      if (showBusy) setBusy(true);
+      try {
+        const [lists, feed, summary] = await Promise.all([
+          api.weddingSongLists(selectedId!),
+          api.weddingChanges(selectedId!),
+          api.wedding(selectedId!),
+        ]);
+        if (cancelled) return;
+        setDetail({
+          id: selectedId!,
+          names: summary.couple_display_name,
+          lists: lists.song_lists,
+          blocklist: lists.blocklist,
         });
-    void load();
-    const timer = window.setInterval(load, 5000);
+        setBriefing(lists.briefing_text ?? null);
+        setChanges(feed.changes);
+        setError('');
+      } catch (caught) {
+        if (!cancelled) setError(message(caught));
+      } finally {
+        if (!cancelled && showBusy) setBusy(false);
+      }
+    }
+
+    void load(true);
+    const timer = window.setInterval(() => void load(false), 15000);
     return () => {
-      alive = false;
+      cancelled = true;
       window.clearInterval(timer);
     };
   }, [selectedId]);
 
-  async function create() {
-    setBusy(true);
-    setError('');
-    try {
-      const created = await api.createCouple(
-        names.trim(),
-        date,
-        djId === '' ? null : djId,
-      );
-      setNames('');
-      setDate('');
-      setDjId('');
-      setSelectedId(created.id);
-      setDetail(created);
-      await s.refreshCouples();
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const chapterOf = (kind: ListKind): SongListWithEntries | undefined =>
+    detail?.lists.find((list) => list.kind === kind);
 
-  async function remove(couple: CoupleDetail) {
-    const sure = window.confirm(
-      `Delete ${couple.names}?\n\nAll their answers, links and the never list are removed.`,
-    );
-    if (!sure) return;
-    try {
-      await api.deleteCouple(couple.id);
-      setSelectedId(null);
-      await s.refreshCouples();
-    } catch (err) {
-      setError(message(err));
-    }
-  }
-
-  async function tokenAction(
-    couple: CoupleDetail,
-    kind: 'couple' | 'friends',
-    action: 'rotate' | 'revoke' | 'enable',
-  ) {
-    setError('');
-    try {
-      if (action === 'rotate') {
-        const sure = window.confirm(
-          `Rotate the ${kind} link?\n\nThe old link stops working immediately — send the new one afterwards.`,
-        );
-        if (!sure) return;
-        setDetail(await api.rotateCoupleToken(couple.id, kind));
-      } else {
-        setDetail(await api.revokeCoupleToken(couple.id, kind, action === 'revoke'));
-      }
-    } catch (err) {
-      setError(message(err));
-    }
-  }
-
-  function loadChapter(couple: CoupleDetail, kind: ListKind, label: string) {
-    s.loadCoupleChapter(couple, kind, label);
-    closePanel();
-  }
-
-  if (detail === null) {
-    return (
-      <Panel title="Couples" subtitle="One record per wedding — the couple fills it in from home.">
-        <section className="panel-section">
-          <h3 className="panel-section-title">New couple</h3>
-          <div className="field-row">
-            <input
-              className="input"
-              style={{ flex: 1 }}
-              placeholder="e.g. Sofie & Jan"
-              value={names}
-              onChange={(event) => setNames(event.target.value)}
-            />
-            <input
-              className="input"
-              style={{ width: 150 }}
-              type="date"
-              placeholder="e.g. 2026-09-19"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-            />
-          </div>
-          {isAdmin && (
-            <div className="field-row">
-              <label className="field-label" htmlFor="couple-dj">
-                Their DJ
-              </label>
-              <select
-                id="couple-dj"
-                className="input"
-                style={{ flex: 1 }}
-                value={djId}
-                onChange={(event) =>
-                  setDjId(event.target.value === '' ? '' : Number(event.target.value))
-                }
-              >
-                <option value="">Me ({user?.display_name})</option>
-                {accounts
-                  .filter((account) => account.id !== user?.id)
-                  .map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.display_name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-          )}
-          <div className="field-row">
-            <button
-              className="btn btn-primary"
-              disabled={!names.trim() || !date || busy}
-              onClick={create}
-            >
-              {busy ? 'Creating…' : 'Create couple'}
-            </button>
-          </div>
-          <p className="hint">
-            Creating a couple makes their two magic links: one for the couple, one shared
-            link for their friends.
-          </p>
-        </section>
-
-        <section className="panel-section">
-          <h3 className="panel-section-title">All couples</h3>
-          {s.couples.length === 0 && <p className="muted">No couples yet.</p>}
-          <div className="list">
-            {s.couples.map((couple) => (
-              <button
-                key={couple.id}
-                className="list-row couple-row"
-                onClick={() => setSelectedId(couple.id)}
-              >
-                <span className="list-main">
-                  <strong>{couple.names}</strong>
-                  <span className="muted"> · {couple.wedding_date}</span>
-                  {isAdmin && couple.dj_name && (
-                    <span className="muted"> · DJ {couple.dj_name}</span>
-                  )}
-                </span>
-                <span className="mono muted">{couple.song_count} songs</span>
-              </button>
-            ))}
-          </div>
-        </section>
-        {error && <p className="error">{error}</p>}
-      </Panel>
-    );
-  }
-
-  const couple = detail;
   return (
     <Panel
-      title={couple.names}
-      subtitle={`Wedding on ${couple.wedding_date} — answers stream in live while they type.`}
+      title="Your weddings"
+      subtitle="The weddings you are playing, and what the couple has answered so far."
     >
-      <section className="panel-section">
-        <button className="btn btn-sm" onClick={() => setSelectedId(null)}>
-          ‹ All couples
-        </button>
-      </section>
+      {error && <div className="notice notice-warn">{error}</div>}
 
-      {isAdmin && (
-        <section className="panel-section">
-          <h3 className="panel-section-title">Their DJ</h3>
-          <div className="field-row">
-            <select
-              className="input"
-              style={{ flex: 1 }}
-              value={couple.dj_id ?? ''}
-              aria-label="The DJ this wedding belongs to"
-              onChange={async (event) => {
-                if (event.target.value === '') return;
-                setError('');
-                try {
-                  setDetail(await api.updateCouple(couple.id, {
-                    dj_id: Number(event.target.value),
-                  }));
-                  await s.refreshCouples();
-                } catch (err) {
-                  setError(message(err));
-                }
-              }}
+      {!selectedId && (
+        <div className="list">
+          {s.weddings.length === 0 && (
+            <p className="muted">
+              Nothing assigned yet. Your planner adds you to a wedding and it appears here.
+            </p>
+          )}
+          {s.weddings.map((wedding: WeddingSummary) => (
+            <button
+              key={wedding.id}
+              className="list-row list-row-button"
+              onClick={() => setSelectedId(wedding.id)}
             >
-              {couple.dj_id === null && <option value="">Unassigned (admin only)</option>}
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.display_name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <p className="hint">
-            Handing the wedding over moves it into that DJ&rsquo;s list — as admin you
-            keep seeing it either way.
-          </p>
-        </section>
+              <span className="list-main">
+                <strong>{wedding.couple_display_name}</strong>
+                <span className="muted"> · {wedding.wedding_date}</span>
+              </span>
+              <span className="mono muted">
+                {wedding.music.lists_in} of {wedding.music.lists_total} lists in
+              </span>
+            </button>
+          ))}
+        </div>
       )}
 
-      <section className="panel-section">
-        <h3 className="panel-section-title">Magic links</h3>
-        {(['couple', 'friends'] as const).map((kind) => {
-          const link = couple.links[kind];
-          const url = `${GUEST_ORIGIN || window.location.origin}${link.path}`;
-          return (
-            <div key={kind} className="couple-link">
-              <span className="field-label">
-                {kind === 'couple' ? 'Couple link — the whole intake' : "Friends link — their top 20 only"}
-                {link.revoked && <span className="warn"> · revoked</span>}
-                {link.expired && <span className="warn"> · expired (wedding passed)</span>}
-              </span>
-              <CopyField value={url} disabled={link.revoked || link.expired} />
-              {kind === 'friends' && !link.revoked && !link.expired && (
-                <>
-                  <QrBadge url={url} />
-                  <p className="hint">
-                    Print or show this QR — friends scan it and their picks land
-                    straight in the friends&rsquo; top 20.
-                  </p>
-                </>
-              )}
-              <div className="field-row">
-                <button className="btn btn-sm" onClick={() => tokenAction(couple, kind, 'rotate')}>
-                  Rotate link
-                </button>
-                <button
-                  className="btn btn-sm"
-                  onClick={() =>
-                    tokenAction(couple, kind, link.revoked ? 'enable' : 'revoke')
-                  }
-                >
-                  {link.revoked ? 'Re-enable' : 'Revoke'}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </section>
+      {selectedId && (
+        <>
+          <div className="field-row">
+            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedId(null)}>
+              ← All weddings
+            </button>
+            {busy && <span className="muted">Loading…</span>}
+          </div>
 
-      <section className="panel-section">
-        <h3 className="panel-section-title">Chapters</h3>
-        <div className="list">
-          {CHAPTERS.map(({ kind, label }) => {
-            const entries = couple.lists[kind] ?? [];
-            const opening = kind === 'opening_dance' ? entries[0] : undefined;
-            return (
-              <details key={kind} className="list-block">
-                <summary className="list-row list-summary">
-                  <span className="list-main">{label}</span>
-                  <span className="mono muted">{entries.length}</span>
-                  <button
-                    className="btn btn-sm"
-                    disabled={entries.length === 0}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      loadChapter(couple, kind, label);
-                    }}
-                  >
-                    Load & match
-                  </button>
-                </summary>
-                <div className="list-detail">
-                  {entries.length === 0 && <p className="muted">Nothing here yet.</p>}
-                  {entries.map((entry) => (
-                    <EntryLine key={entry.uid} entry={entry} />
+          {detail && (
+            <>
+              <h3 className="panel-h">{detail.names}</h3>
+
+              {briefing && (
+                <div className="list-block">
+                  <div className="mono muted">HOW THEY WANT THE NIGHT TO GO</div>
+                  <p className="list-detail">{briefing}</p>
+                </div>
+              )}
+
+              {CHAPTERS.map(({ kind, label }) => {
+                const chapter = chapterOf(kind);
+                const entries = chapter?.entries ?? [];
+                return (
+                  <div key={kind} className="list-block">
+                    <div className="list-row">
+                      <span className="list-main">
+                        <strong>{label}</strong>
+                        <span className="muted">
+                          {' '}
+                          · {entries.length}
+                          {chapter?.max_songs ? ` of ${chapter.max_songs}` : ''}
+                        </span>
+                      </span>
+                      {entries.length > 0 && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          title="Load this chapter into the match table"
+                          onClick={() => {
+                            s.loadCoupleChapter(detail, kind, label);
+                            closePanel();
+                          }}
+                        >
+                          Match these
+                        </button>
+                      )}
+                    </div>
+                    {entries.map((entry) => (
+                      <EntryLine key={entry.uid} entry={entry} />
+                    ))}
+                  </div>
+                );
+              })}
+
+              {detail.blocklist.length > 0 && (
+                <div className="list-block">
+                  <div className="list-row">
+                    <span className="list-main">
+                      <strong>The never list</strong>
+                      <span className="muted"> · {detail.blocklist.length}</span>
+                    </span>
+                  </div>
+                  {/*
+                    Shown, never loaded into the match table. The export
+                    re-checks server-side and drops these in every version of
+                    the song, so a banned track cannot reach the decks even if
+                    it were picked by hand.
+                  */}
+                  {detail.blocklist.map((entry) => (
+                    <BlockLine key={entry.uid} entry={entry} />
                   ))}
-                  {opening?.start_pref && (
-                    <p className="hint">
-                      Start: {opening.start_pref === 'top'
-                        ? 'from the top'
-                        : opening.start_pref === 'chorus'
-                          ? 'from the chorus'
-                          : 'fade in'}
-                    </p>
-                  )}
-                  {opening?.note && <p className="hint">Note: “{opening.note}”</p>}
                 </div>
-              </details>
-            );
-          })}
-
-          <details className="list-block">
-            <summary className="list-row list-summary">
-              <span className="list-main">Playlist links</span>
-              <span className="mono muted">{(couple.lists.playlist_links ?? []).length}</span>
-            </summary>
-            <div className="list-detail">
-              {(couple.lists.playlist_links ?? []).length === 0 && (
-                <p className="muted">No playlists pasted.</p>
               )}
-              {(couple.lists.playlist_links ?? []).map((entry) => (
-                <p key={entry.uid} className="couple-plink">
-                  <a href={entry.free_text ?? '#'} target="_blank" rel="noreferrer">
-                    {entry.free_text}
-                  </a>
-                </p>
-              ))}
-              <p className="hint">Open a link and pull it in via “Add playlist”.</p>
-            </div>
-          </details>
 
-          <details className="list-block">
-            <summary className="list-row list-summary">
-              <span className="list-main warn">Never list — blocked in every export</span>
-              <span className="mono muted">{couple.blocklist.length}</span>
-            </summary>
-            <div className="list-detail">
-              {couple.blocklist.length === 0 && <p className="muted">Nothing banned.</p>}
-              {couple.blocklist.map((block) => (
-                <div key={block.uid} className="list-track">
-                  <span className="list-main">
-                    {block.artist ? `${block.artist} – ` : ''}
-                    {block.title}
-                  </span>
+              {changes.length > 0 && (
+                <div className="list-block">
+                  <div className="mono muted">WHAT CHANGED</div>
+                  {changes.slice(0, 12).map((change, index) => (
+                    <div className="list-track" key={`${change.at}-${index}`}>
+                      <span className="list-main">
+                        {change.summary}
+                        {/* A friend has no identity here beyond which link they used. */}
+                        {change.token_kind === 'friend' && (
+                          <span className="muted"> · a friend</span>
+                        )}
+                      </span>
+                      <span className="mono muted">{timeAgo(change.at)}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </details>
-        </div>
-        <p className="hint">
-          “Load &amp; match” drops the chapter into the match table — match and export it
-          exactly like any playlist. Never-list songs are excluded automatically.
-        </p>
-      </section>
-
-      <section className="panel-section">
-        <h3 className="panel-section-title">How they party</h3>
-        <p className={couple.briefing_text ? 'couple-briefing' : 'muted'}>
-          {couple.briefing_text || 'No briefing yet — it appears as they fill in the finale.'}
-        </p>
-      </section>
-
-      <section className="panel-section">
-        <h3 className="panel-section-title">Recent changes</h3>
-        {couple.changes.length === 0 && <p className="muted">No activity yet.</p>}
-        {couple.changes.slice(0, 12).map((change, index) => (
-          <p key={`${change.at}-${index}`} className="couple-change">
-            <span className="mono muted">{timeAgo(change.at)}</span>{' '}
-            <span className={`couple-actor couple-actor-${change.token_kind}`}>
-              {change.token_kind}
-            </span>{' '}
-            {change.summary}
-          </p>
-        ))}
-      </section>
-
-      <section className="panel-section">
-        <button className="btn btn-sm couple-delete" onClick={() => remove(couple)}>
-          Delete this couple
-        </button>
-      </section>
-      {error && <p className="error">{error}</p>}
+              )}
+            </>
+          )}
+        </>
+      )}
     </Panel>
   );
 }

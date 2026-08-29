@@ -11,7 +11,7 @@ export function Sidebar() {
   const { user, signOut } = useAuth();
   const ui = useUi();
   const [libOpen, setLibOpen] = useState(false);
-  const { lib, libraries, activeId, playlists, playlist, filterId, prefs, results, chosenIds, leftOut, couples } = s;
+  const { lib, libraries, activeId, playlists, playlist, filterId, prefs, results, chosenIds, leftOut, weddings } = s;
 
   const libraryName = lib?.active_library_name ?? 'No library';
   const trackCount = lib?.track_count ?? 0;
@@ -129,20 +129,25 @@ export function Sidebar() {
           </button>
         </div>
         <div className="nav-list">
-          {couples.length === 0 ? (
-            <button className="nav-empty" onClick={() => ui.openPanel('couples', 'new')}>
-              Create a wedding couple
-            </button>
+          {weddings.length === 0 ? (
+            /*
+              Not a "create" button any more. Weddings are made in the planner
+              app by whoever booked the couple; a DJ sees the ones they have
+              been assigned to.
+            */
+            <span className="nav-empty nav-empty-quiet">No weddings assigned yet</span>
           ) : (
-            couples.map((couple) => (
+            weddings.map((wedding) => (
               <button
-                key={couple.id}
-                className={`nav-item ${s.activeCouple?.id === couple.id ? 'active' : ''}`}
-                title={`${couple.names} — ${couple.wedding_date}`}
-                onClick={() => ui.openPanel('couples', String(couple.id))}
+                key={wedding.id}
+                className={`nav-item ${s.activeCouple?.id === wedding.id ? 'active' : ''}`}
+                title={`${wedding.couple_display_name} — ${wedding.wedding_date}`}
+                onClick={() => ui.openPanel('couples', wedding.id)}
               >
-                <span className="nav-item-name">{couple.names}</span>
-                <span className="mono nav-item-count">{couple.song_count}</span>
+                <span className="nav-item-name">{wedding.couple_display_name}</span>
+                <span className="mono nav-item-count">
+                  {wedding.music.lists_in}/{wedding.music.lists_total}
+                </span>
               </button>
             ))
           )}

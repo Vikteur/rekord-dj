@@ -1,6 +1,6 @@
 import type {
-  CoupleDetail,
-  CoupleSummary,
+  BlockEntry,
+  CoupleChange,
   LibrarySummary,
   LibraryTrack,
   MatchResult,
@@ -11,7 +11,10 @@ import type {
   PlaylistTrack,
   Preference,
   ScanStatus,
+  SongListWithEntries,
   UserAccount,
+  Wedding,
+  WeddingSummary,
   XmlImportResult,
 } from './types';
 
@@ -163,36 +166,31 @@ export const api = {
     request<{ preferences: Preference[] }>(`/api/preferences/${id}`, { method: 'DELETE' }),
   forgetAllChoices: () =>
     request<{ preferences: Preference[] }>('/api/preferences', { method: 'DELETE' }),
-  // wedding couples (DJ side)
-  couples: () => request<{ couples: CoupleSummary[] }>('/api/couples'),
-  couple: (id: number) => request<CoupleDetail>(`/api/couples/${id}`),
-  createCouple: (names: string, weddingDate: string, djId: number | null = null) =>
-    request<CoupleDetail>('/api/couples', {
-      method: 'POST',
-      body: JSON.stringify({ names, wedding_date: weddingDate, dj_id: djId }),
-    }),
-  updateCouple: (
-    id: number,
-    fields: {
-      names?: string;
-      wedding_date?: string;
-      briefing_text?: string;
-      dj_id?: number;
-    },
-  ) =>
-    request<CoupleDetail>(`/api/couples/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(fields),
-    }),
-  deleteCouple: (id: number) =>
-    request<{ couples: CoupleSummary[] }>(`/api/couples/${id}`, { method: 'DELETE' }),
-  rotateCoupleToken: (id: number, kind: 'couple' | 'friends') =>
-    request<CoupleDetail>(`/api/couples/${id}/tokens/${kind}/rotate`, { method: 'POST' }),
-  revokeCoupleToken: (id: number, kind: 'couple' | 'friends', revoked: boolean) =>
-    request<CoupleDetail>(`/api/couples/${id}/tokens/${kind}/revoke`, {
-      method: 'POST',
-      body: JSON.stringify({ revoked }),
-    }),
+  /*
+    The weddings this DJ is playing.
+
+    Read-only, and deliberately so. Creating a wedding, rotating a couple's
+    link and revoking it are the planner's, because they are the person who
+    booked the couple and owns the relationship — the DJ is assigned to the
+    day. Access follows the person the planner named in the DJ slot, not the
+    company they belong to, so being listed in the directory as a DJ is not
+    enough to see anything.
+
+    This used to be `/api/couples`, where the DJ could create and delete. That
+    moved with the domain redesign; an account holding both roles does those
+    things in the planner app and sees the result here.
+  */
+  weddings: () => request<{ weddings: WeddingSummary[] }>('/api/dj/weddings'),
+  wedding: (id: string) => request<Wedding>(`/api/dj/weddings/${id}`),
+  /** The lists with their songs — the DJ is one of the two parties they are for. */
+  weddingSongLists: (id: string) =>
+    request<{
+      song_lists: SongListWithEntries[];
+      blocklist: BlockEntry[];
+      briefing_text?: string | null;
+    }>(`/api/dj/weddings/${id}/song-lists`),
+  weddingChanges: (id: string) =>
+    request<{ changes: CoupleChange[] }>(`/api/dj/weddings/${id}/changes`),
 };
 
 async function download(path: string, body: unknown, filename: string): Promise<void> {
@@ -216,12 +214,12 @@ export function downloadExport(
   name: string,
   format: 'm3u8' | 'xml',
   trackIds: string[],
-  coupleId: number | null = null,
+  weddingId: string | null = null,
 ): Promise<void> {
   const stem = name.trim() || 'playlist';
   return download(
     '/api/export',
-    { name, format, track_ids: trackIds, couple_id: coupleId },
+    { name, format, track_ids: trackIds, wedding_id: weddingId },
     `${stem}.${format === 'xml' ? 'rekordbox.xml' : 'm3u8'}`,
   );
 }
@@ -229,11 +227,11 @@ export function downloadExport(
 export function downloadMissing(
   name: string,
   tracks: { artist: string; title: string; had_candidates: boolean }[],
-  coupleId: number | null = null,
+  weddingId: string | null = null,
 ): Promise<void> {
   return download(
     '/api/export/missing',
-    { name, tracks, couple_id: coupleId },
+    { name, tracks, wedding_id: weddingId },
     `${name.trim() || 'playlist'} - missing.txt`,
   );
 }
