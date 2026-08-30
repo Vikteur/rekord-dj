@@ -17,10 +17,16 @@ export function UsersPanel() {
   const [error, setError] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<string | null>(null); // which action runs
-  const [resetFor, setResetFor] = useState<string | null>(null);
-  const [newPassword, setNewPassword] = useState('');
+  /*
+    The invite link, shown once.
+
+    It is in the response that created it and nowhere else — not recoverable,
+    by design, because a link that can be re-read is a second copy of a
+    credential sitting in a database. If the planner loses it they issue
+    another, which invalidates this one.
+  */
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -43,24 +49,27 @@ export function UsersPanel() {
     }
   }
 
-  async function create() {
-    const created = await run('create', () =>
-      api.createUser(username.trim(), displayName.trim(), password),
-    );
-    if (created) {
+  /**
+   * Invite a DJ.
+   *
+   * Replaces creating the account with a password the planner typed — which
+   * meant the planner knew it, and the DJ could never be the only person who
+   * did. The invite link lets them set their own.
+   */
+  async function invite() {
+    setBusy('invite');
+    setError('');
+    setInviteLink(null);
+    try {
+      const created = await api.inviteUser(username.trim(), displayName.trim());
+      setInviteLink(created.accept_url ?? null);
       setUsername('');
       setDisplayName('');
-      setPassword('');
-    }
-  }
-
-  async function resetPassword(target: UserAccount) {
-    const done = await run(`reset-${target.id}`, () =>
-      api.updateUser(target.id, { password: newPassword }),
-    );
-    if (done) {
-      setResetFor(null);
-      setNewPassword('');
+      setUsers((await api.users()).users);
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -76,14 +85,15 @@ export function UsersPanel() {
   return (
     <Panel
       title="DJ accounts"
-      subtitle="One login per DJ — each sees only their own couples and library."
+      subtitle="One login per DJ — each sees the weddings they are assigned to, and their own library."
     >
       <section className="panel-section">
-        <h3 className="panel-section-title">New DJ</h3>
+        <h3 className="panel-section-title">Invite a DJ</h3>
         <div className="stack">
           <input
             className="input"
-            placeholder="e.g. sarah — their sign-in name"
+            type="email"
+            placeholder="their email — the invite goes here"
             value={username}
             onChange={(event) => setUsername(event.target.value)}
           />
@@ -93,24 +103,31 @@ export function UsersPanel() {
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
           />
-          <input
-            className="input"
-            type="password"
-            placeholder="e.g. a starter password (min 8 characters)"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
         </div>
         <div className="field-row">
           <button
             className="btn btn-primary"
-            title="Create the account and hand these details to the DJ"
-            disabled={!username.trim() || password.length < 8 || busy !== null}
-            onClick={create}
+            title="Create a single-use link for this DJ to set their own password"
+            disabled={!username.trim() || busy !== null}
+            onClick={invite}
           >
-            {busy === 'create' ? 'Creating…' : 'Create DJ account'}
+            {busy === 'invite' ? 'Inviting…' : 'Create invite link'}
           </button>
         </div>
+        {inviteLink && (
+          <div className="list-block">
+            <p className="hint">
+              Send them this link. It is shown once and cannot be looked up again —
+              issue another if it goes astray.
+            </p>
+            <input
+              className="input"
+              readOnly
+              value={inviteLink}
+              onFocus={(event) => event.target.select()}
+            />
+          </div>
+        )}
       </section>
 
       <section className="panel-section">
@@ -130,16 +147,12 @@ export function UsersPanel() {
                 </span>
                 {account.role !== 'PLANNER' && (
                   <span className="field-row">
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      title="Set a new password for this DJ"
-                      onClick={() => {
-                        setResetFor(resetFor === account.id ? null : account.id);
-                        setNewPassword('');
-                      }}
-                    >
-                      Reset password
-                    </button>
+                    {/*
+                      No "reset password" any more. The planner setting a DJ's
+                      password meant the planner knew it; a DJ who is locked out
+                      gets a fresh invite instead, and remains the only person
+                      who knows their own password.
+                    */}
                     <button
                       className="btn btn-ghost btn-sm"
                       title={
@@ -167,25 +180,6 @@ export function UsersPanel() {
                   </span>
                 )}
               </div>
-              {resetFor === account.id && (
-                <div className="field-row list-detail">
-                  <input
-                    className="input"
-                    style={{ flex: 1 }}
-                    type="password"
-                    placeholder="e.g. a fresh password (min 8 characters)"
-                    value={newPassword}
-                    onChange={(event) => setNewPassword(event.target.value)}
-                  />
-                  <button
-                    className="btn btn-sm"
-                    disabled={newPassword.length < 8 || busy !== null}
-                    onClick={() => void resetPassword(account)}
-                  >
-                    {busy === `reset-${account.id}` ? 'Saving…' : 'Save password'}
-                  </button>
-                </div>
-              )}
             </div>
           ))}
         </div>

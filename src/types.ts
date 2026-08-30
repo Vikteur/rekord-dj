@@ -50,6 +50,7 @@ export type Preference = S['Preference']
 
 export type Me = S['Me']
 export type UserAccount = S['UserAccount']
+export type Invite = S['Invite']
 export type Role = S['Role']
 
 // --- the couple's lists -----------------------------------------------------

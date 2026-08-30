@@ -1,6 +1,7 @@
 import type {
   BlockEntry,
   CoupleChange,
+  Invite,
   LibrarySummary,
   LibraryTrack,
   MatchResult,
@@ -70,17 +71,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   // sign-in and accounts
   me: () => request<{ user: Me }>('/api/me'),
-  login: (username: string, password: string) =>
+  login: (email: string, password: string) =>
     request<{ user: Me }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ email, password }),
     }),
   logout: () => request<{ signed_out: boolean }>('/api/auth/logout', { method: 'POST' }),
-  users: () => request<{ users: UserAccount[] }>('/api/users'),
-  createUser: (username: string, displayName: string, password: string) =>
-    request<{ users: UserAccount[] }>('/api/users', {
+  /*
+    Accounts live under the organisation now, and a DJ is invited rather than
+    created with a password somebody else typed. That was the old shape's real
+    problem: the admin chose the password, so they knew it, and the DJ had no
+    way to be the only person who did.
+  */
+  users: () => request<{ users: UserAccount[] }>('/api/org/members'),
+  /** Returns the single-use link, which is shown once and never recoverable. */
+  inviteUser: (email: string, displayName: string) =>
+    request<Invite>('/api/org/invites', {
       method: 'POST',
-      body: JSON.stringify({ username, display_name: displayName, password }),
+      body: JSON.stringify({ email, display_name: displayName, role: 'DJ' }),
     }),
   updateUser: (
     // uuid, not an auto-increment integer: accounts are addressed by an
@@ -88,16 +96,15 @@ export const api = {
     id: string,
     fields: {
       display_name?: string
-      password?: string
       status?: 'INVITED' | 'ACTIVE' | 'DISABLED'
     },
   ) =>
-    request<{ users: UserAccount[] }>(`/api/users/${id}`, {
+    request<{ users: UserAccount[] }>(`/api/org/members/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(fields),
     }),
   deleteUser: (id: string) =>
-    request<{ users: UserAccount[] }>(`/api/users/${id}`, { method: 'DELETE' }),
+    request<{ users: UserAccount[] }>(`/api/org/members/${id}`, { method: 'DELETE' }),
   library: () => request<LibrarySummary>('/api/library'),
   createLibrary: (name: string) =>
     request<LibrarySummary>('/api/libraries', {

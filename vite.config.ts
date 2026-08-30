@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // Where the API (Vikteur/spotify-to-rekordbox) is during `npm run dev`.
-const apiTarget = process.env.API_URL ?? `http://127.0.0.1:${process.env.API_PORT ?? '8000'}`;
+const apiTarget = process.env.API_URL ?? `http://127.0.0.1:${process.env.API_PORT ?? '8080'}`;
 
 export default defineConfig({
   plugins: [react()],

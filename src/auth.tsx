@@ -22,7 +22,7 @@ type AuthStatus = 'checking' | 'anon' | 'authed';
 interface AuthValue {
   status: AuthStatus;
   user: Me | null;
-  signIn: (username: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -51,8 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(SIGNED_OUT_EVENT, onSignedOut);
   }, []);
 
-  const signIn = useCallback(async (username: string, password: string) => {
-    const data = await api.login(username, password);
+  const signIn = useCallback(async (email: string, password: string) => {
+    const data = await api.login(email, password);
     setUser(data.user);
     setStatus('authed');
   }, []);

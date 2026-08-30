@@ -38,16 +38,17 @@ export function LoginView() {
           <span className="brand-name">Rekord Match</span>
         </div>
         <p className="hint login-hint">
-          Sign in with the account your admin set up. Couples and friends
-          don’t sign in — their magic link is their key.
+          Sign in with the account your planner invited you to. Couples and
+          friends don’t sign in — their magic link is their key.
         </p>
-        <label className="field-label" htmlFor="login-username">
-          Username
+        <label className="field-label" htmlFor="login-email">
+          Email
         </label>
         <input
-          id="login-username"
+          id="login-email"
           className="input"
-          placeholder="e.g. viktor"
+          type="email"
+          placeholder="you@example.com"
           autoComplete="username"
           autoFocus
           value={username}
@@ -60,7 +61,7 @@ export function LoginView() {
           id="login-password"
           className="input"
           type="password"
-          placeholder="e.g. your DJ password"
+          placeholder="your password"
           autoComplete="current-password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
