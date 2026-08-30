@@ -1,0 +1,130 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: deploy-dj-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+
+      # The contract is the source of truth for these types, and they are
+      # committed so a build does not need a second repo. Regenerating here and
+      # then typechecking is what makes that safe: if the contract has moved and
+      # this app has not followed, the build fails rather than the API answering
+      # with a shape nobody here expects.
+      - uses: actions/checkout@v4
+        with:
+          repository: Vikteur/rekord-contract
+          path: contract
+          token: ${{ secrets.CONTRACT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        working-directory: app
+        run: npm ci
+
+      - name: Regenerate types from the contract
+        working-directory: app
+        run: npx openapi-typescript ../contract/openapi.yaml -o src/api/schema.d.ts
+
+      - name: Fail if the committed types are stale
+        working-directory: app
+        run: |
+          if ! git diff --quiet -- src/api/schema.d.ts; then
+            echo "::error::src/api/schema.d.ts is out of date with the contract."
+            echo "Run 'npm run types' and commit the result."
+            git diff --stat -- src/api/schema.d.ts
+            exit 1
+          fi
+
+      - name: Typecheck
+        working-directory: app
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: app
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dj-dist
+          path: app/dist/
+          retention-days: 7
+
+  deploy:
+    name: Deploy to Hetzner
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dj-dist
+          path: dist
+
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" >~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" >~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$HETZNER_HOST" >~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      # Uploaded beside the live directory and swapped, rather than written over
+      # it. A part-uploaded bundle served to somebody is an index.html asking
+      # for assets that are not there yet, which looks like the app is broken.
+      - name: Ship the bundle
+        env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          USER: ${{ secrets.HETZNER_USER }}
+          WEB_DIR: ${{ secrets.WEB_DIR }}
+        run: |
+          WEB_DIR="${WEB_DIR:-/opt/rekordmatch/web}"
+          # This bundle lives at the web root, and the other two apps live in
+          # directories inside it — so this cannot swap a directory the way
+          # they do. It uploads beside, then moves the files in and clears out
+          # the previous build's hashed assets, leaving planner/ and guest/
+          # untouched.
+          ssh -i ~/.ssh/id_deploy "${USER}@${HOST}" \
+            "rm -rf '${WEB_DIR}/.dj.new' && mkdir -p '${WEB_DIR}/.dj.new'"
+          scp -i ~/.ssh/id_deploy -r dist/. \
+            "${USER}@${HOST}:${WEB_DIR}/.dj.new/"
+          ssh -i ~/.ssh/id_deploy "${USER}@${HOST}" \
+            "rm -rf '${WEB_DIR}/assets' \
+             && cp -a '${WEB_DIR}/.dj.new/.' '${WEB_DIR}/' \
+             && rm -rf '${WEB_DIR}/.dj.new'"
+
+      - name: Check it is being served
+        env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          USER: ${{ secrets.HETZNER_USER }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "${USER}@${HOST}" \
+            "curl -fsS --max-time 5 http://127.0.0.1/ >/dev/null" \
+            || echo "::warning::could not confirm / over http on the box"
